@@ -221,10 +221,8 @@ export default function AttendancePage() {
       playBeep(600, 0.1);
 
       let currentStep = 1;
-      let hasBlinked = false;
-      let hasTurnedHead = false;
       let attempts = 0;
-      const maxAttempts = 100; // ~20 giây tối đa
+      const maxAttempts = 200; // ~20 giây với chu kỳ 100ms
 
       const scanInterval = setInterval(async () => {
         attempts++;
@@ -243,13 +241,14 @@ export default function AttendancePage() {
         if (!videoRef.current) return;
 
         try {
+          // BƯỚC TRACKING NHANH: Chỉ lấy landmarks (không lấy descriptor), tăng tốc độ xử lý gấp 5 lần
           const detection = await faceapi.detectSingleFace(
             videoRef.current,
             new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
-          ).withFaceLandmarks().withFaceDescriptor();
+          ).withFaceLandmarks();
 
           if (detection) {
-            // Draw facial landmarks in real-time
+            // Vẽ landmarks lên canvas thời gian thực
             if (videoRef.current && canvasRef.current) {
               const displaySize = {
                 width: videoRef.current.clientWidth,
@@ -258,11 +257,8 @@ export default function AttendancePage() {
               faceapi.matchDimensions(canvasRef.current, displaySize);
               const resizedDetection = faceapi.resizeResults(detection, displaySize);
               
-              // Clear previous drawings
               const ctx = canvasRef.current.getContext('2d');
               ctx?.clearRect(0, 0, displaySize.width, displaySize.height);
-              
-              // Draw landmarks
               faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetection);
             }
 
@@ -280,20 +276,9 @@ export default function AttendancePage() {
               currentStep = 2;
               setRegisterStep(2);
               setRegisterProgress(35);
-              setLivenessMessage('Bước 2/3: Hãy CHỚP MẮT 1 lần để xác thực...');
+              setLivenessMessage('Bước 2/3: Quay đầu nhẹ sang trái/phải để quét góc...');
             } 
             else if (currentStep === 2) {
-              // Phát hiện chớp mắt (EAR < 0.23)
-              if (avgEAR < 0.23) {
-                hasBlinked = true;
-                playBeep(800, 0.1);
-                currentStep = 3;
-                setRegisterStep(3);
-                setRegisterProgress(70);
-                setLivenessMessage('Bước 3/3: Quay đầu nhẹ sang trái/phải để quét góc...');
-              }
-            } 
-            else if (currentStep === 3) {
               // Phát hiện quay đầu (khoảng cách mũi tới viền hàm 2 bên bất cân xứng)
               const nose = landmarks.getNose()[3]; // đỉnh mũi
               const jaw = landmarks.getJawOutline();
@@ -303,8 +288,17 @@ export default function AttendancePage() {
               const distRight = Math.sqrt(Math.pow(nose.x - rightJaw.x, 2) + Math.pow(nose.y - rightJaw.y, 2));
               const ratio = distLeft / distRight;
 
-              if (ratio < 0.6 || ratio > 1.6) {
-                hasTurnedHead = true;
+              if (ratio < 0.65 || ratio > 1.55) {
+                playBeep(800, 0.1);
+                currentStep = 3;
+                setRegisterStep(3);
+                setRegisterProgress(70);
+                setLivenessMessage('Bước 3/3: Nhìn thẳng và CHỚP MẮT 1 lần để hoàn thành...');
+              }
+            } 
+            else if (currentStep === 3) {
+              // Phát hiện chớp mắt ở góc nhìn thẳng (EAR < 0.23)
+              if (avgEAR < 0.23) {
                 clearInterval(scanInterval);
                 clearCanvas();
                 setCurrentEAR(null);
@@ -312,26 +306,40 @@ export default function AttendancePage() {
                 setRegisterStep(4);
                 setRegisterProgress(100);
                 setLivenessStatus('blinking');
-                setLivenessMessage('Hoàn tất quét FaceID! Đang lưu thông tin...');
+                setLivenessMessage('Đang phân tích và trích xuất đặc trưng khuôn mặt...');
                 playSuccessChime();
 
-                const image = captureFrame();
-                const descriptorArr = Array.from(detection.descriptor);
+                // Đợi 200ms cho mắt mở ra trở lại rồi mới chụp ảnh chân dung chất lượng cao
+                setTimeout(async () => {
+                  if (!videoRef.current) return;
+                  try {
+                    // Gọi mô hình đầy đủ lấy FaceDescriptor chất lượng cao góc chính diện
+                    const finalDetection = await faceapi.detectSingleFace(
+                      videoRef.current,
+                      new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+                    ).withFaceLandmarks().withFaceDescriptor();
 
-                try {
-                  await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
-                  setLivenessStatus('success');
-                  setLivenessMessage('Đăng ký FaceID thành công!');
-                  setScanResult('SUCCESS');
-                } catch (err: any) {
-                  setLivenessStatus('failed');
-                  setLivenessMessage(err.response?.data?.message || 'Lỗi lưu thông tin FaceID');
-                  setScanResult('ERROR');
-                } finally {
-                  setIsScanning(false);
-                  setRegisterStep(0);
-                  setRegisterProgress(0);
-                }
+                    if (finalDetection) {
+                      const image = captureFrame();
+                      const descriptorArr = Array.from(finalDetection.descriptor);
+
+                      await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
+                      setLivenessStatus('success');
+                      setLivenessMessage('Đăng ký FaceID thành công!');
+                      setScanResult('SUCCESS');
+                    } else {
+                      throw new Error('Không thể nhận diện khuôn mặt ở bước cuối cùng');
+                    }
+                  } catch (err: any) {
+                    setLivenessStatus('failed');
+                    setLivenessMessage(err.response?.data?.message || err.message || 'Lỗi lưu thông tin FaceID');
+                    setScanResult('ERROR');
+                  } finally {
+                    setIsScanning(false);
+                    setRegisterStep(0);
+                    setRegisterProgress(0);
+                  }
+                }, 200);
               }
             }
           } else {
@@ -340,7 +348,7 @@ export default function AttendancePage() {
         } catch (err) {
           console.error('Registration scan error:', err);
         }
-      }, 200);
+      }, 100); // 100ms để bắt chớp mắt nhạy gấp đôi
 
     } else {
       // CHECKIN MODE (Chỉ cần chớp mắt xác thực thực thể sống)
@@ -349,7 +357,7 @@ export default function AttendancePage() {
 
       let hasBlinked = false;
       let attempts = 0;
-      const maxAttempts = 60; 
+      const maxAttempts = 120; // 12 giây với chu kỳ 100ms
 
       const scanInterval = setInterval(async () => {
         attempts++;
@@ -367,13 +375,13 @@ export default function AttendancePage() {
         if (!videoRef.current) return;
 
         try {
+          // BƯỚC TRACKING NHANH: Chỉ lấy landmarks để tính toán EAR
           const detection = await faceapi.detectSingleFace(
             videoRef.current,
             new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
-          ).withFaceLandmarks().withFaceDescriptor();
+          ).withFaceLandmarks();
 
           if (detection) {
-            // Draw facial landmarks in real-time
             if (videoRef.current && canvasRef.current) {
               const displaySize = {
                 width: videoRef.current.clientWidth,
@@ -384,14 +392,12 @@ export default function AttendancePage() {
               
               const ctx = canvasRef.current.getContext('2d');
               ctx?.clearRect(0, 0, displaySize.width, displaySize.height);
-              
               faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetection);
             }
 
             const landmarks = detection.landmarks;
             const leftEye = landmarks.getLeftEye();
             const rightEye = landmarks.getRightEye();
-
             const earLeft = calculateEAR(leftEye);
             const earRight = calculateEAR(rightEye);
             const avgEAR = (earLeft + earRight) / 2;
@@ -399,34 +405,46 @@ export default function AttendancePage() {
 
             if (avgEAR < 0.23) {
               hasBlinked = true;
-              setLivenessStatus('blinking');
-              setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
-              
               clearInterval(scanInterval);
               clearCanvas();
               setCurrentEAR(null);
+              setLivenessStatus('blinking');
+              setLivenessMessage('Đã phát hiện chớp mắt! Đang xác thực...');
               playBeep(900, 0.15);
 
-              const image = captureFrame();
-              const descriptorArr = Array.from(detection.descriptor);
+              // Đợi 200ms cho mắt mở hẳn để trích xuất đặc trưng và chụp chân dung
+              setTimeout(async () => {
+                if (!videoRef.current) return;
+                try {
+                  const finalDetection = await faceapi.detectSingleFace(
+                    videoRef.current,
+                    new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+                  ).withFaceLandmarks().withFaceDescriptor();
 
-              try {
-                await api.post('/attendance', {
-                  eventId: selectedEventId, method: 'FACEID',
-                  faceImage: image, checkInDescriptor: JSON.stringify(descriptorArr),
-                  latitude: lat, longitude: lon
-                });
-                setLivenessStatus('success');
-                setLivenessMessage('Xác thực thực thể sống thành công!');
-                setScanResult('SUCCESS');
-              } catch (err: any) {
-                setLivenessStatus('failed');
-                setLivenessMessage(err.response?.data?.message || 'Lỗi xử lý xác thực');
-                setScanResult('ERROR');
-                if (err.response?.data?.message) alert(err.response.data.message);
-              } finally {
-                setIsScanning(false);
-              }
+                  if (finalDetection) {
+                    const image = captureFrame();
+                    const descriptorArr = Array.from(finalDetection.descriptor);
+
+                    await api.post('/attendance', {
+                      eventId: selectedEventId, method: 'FACEID',
+                      faceImage: image, checkInDescriptor: JSON.stringify(descriptorArr),
+                      latitude: lat, longitude: lon
+                    });
+                    setLivenessStatus('success');
+                    setLivenessMessage('Xác thực thực thể sống thành công!');
+                    setScanResult('SUCCESS');
+                  } else {
+                    throw new Error('Không thể trích xuất đặc trưng khuôn mặt');
+                  }
+                } catch (err: any) {
+                  setLivenessStatus('failed');
+                  setLivenessMessage(err.response?.data?.message || err.message || 'Lỗi xử lý xác thực');
+                  setScanResult('ERROR');
+                  if (err.response?.data?.message) alert(err.response.data.message);
+                } finally {
+                  setIsScanning(false);
+                }
+              }, 200);
             }
           } else {
             clearCanvas();
