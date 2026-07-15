@@ -17,13 +17,18 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── POST /attendance — FaceID self check-in (Student on own device) ────────
+// ─── POST /attendance — FaceID / QR Code self check-in (Student on own device) ──
 router.post('/', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { eventId, method, faceImage, checkInDescriptor, latitude, longitude } = req.body;
     const userId = req.user?.userId;
 
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // Bảo mật: Tự điểm danh chỉ được dùng FACEID hoặc QR_CODE
+    if (method !== 'FACEID' && method !== 'QR_CODE') {
+      return res.status(400).json({ message: 'Phương thức điểm danh không hợp lệ cho tự phục vụ' });
+    }
 
     const event = await prisma.event.findUnique({ where: { id: eventId }, include: { club: true } });
     if (!event) return res.status(404).json({ message: 'Sự kiện không tồn tại' });
@@ -34,6 +39,20 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     });
     if (!membership && req.user?.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Bạn chưa là thành viên của CLB này. Không thể điểm danh!' });
+    }
+
+    // Bảo mật: Định vị Geofencing cho tự phục vụ (nếu sự kiện có cấu hình toạ độ)
+    const MAX_DISTANCE_METRES = 100;
+    if (event.latitude != null && event.longitude != null) {
+      if (latitude == null || longitude == null) {
+        return res.status(400).json({ message: 'Sự kiện này yêu cầu bật định vị GPS để điểm danh' });
+      }
+      const dist = haversineDistance(latitude, longitude, event.latitude, event.longitude);
+      if (dist > MAX_DISTANCE_METRES) {
+        return res.status(400).json({
+          message: `Bạn đang cách khu vực tổ chức ${Math.round(dist)}m. Vui lòng đến gần hơn (trong vòng ${MAX_DISTANCE_METRES}m) để điểm danh.`
+        });
+      }
     }
 
     // AI Face Verification
@@ -69,9 +88,9 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
       data: {
         eventId,
         userId,
-        method: method || 'MANUAL',
+        method: method as any,
         snapshotImage: method === 'FACEID' ? faceImage : null,
-        isValid: method === 'FACEID' || method === 'QR_CODE' ? true : undefined,
+        isValid: true,
         latitude: latitude ?? null,
         longitude: longitude ?? null,
       }
