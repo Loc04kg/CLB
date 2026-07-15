@@ -28,6 +28,7 @@ export default function AttendancePage() {
   // iPhone-style FaceID registration states
   const [registerProgress, setRegisterProgress] = useState(0);
   const [registerStep, setRegisterStep] = useState(0); // 0: idle, 1: look_straight, 2: blink, 3: turn_head, 4: done
+  const [currentEAR, setCurrentEAR] = useState<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const playBeep = (freq = 600, duration = 0.1) => {
@@ -239,6 +240,12 @@ export default function AttendancePage() {
 
           if (detection) {
             const landmarks = detection.landmarks;
+            const leftEye = landmarks.getLeftEye();
+            const rightEye = landmarks.getRightEye();
+            const earLeft = calculateEAR(leftEye);
+            const earRight = calculateEAR(rightEye);
+            const avgEAR = (earLeft + earRight) / 2;
+            setCurrentEAR(avgEAR);
             
             if (currentStep === 1) {
               // Nhìn thẳng (Đã phát hiện khuôn mặt là OK)
@@ -249,14 +256,8 @@ export default function AttendancePage() {
               setLivenessMessage('Bước 2/3: Hãy CHỚP MẮT 1 lần để xác thực...');
             } 
             else if (currentStep === 2) {
-              // Phát hiện chớp mắt (EAR < 0.20)
-              const leftEye = landmarks.getLeftEye();
-              const rightEye = landmarks.getRightEye();
-              const earLeft = calculateEAR(leftEye);
-              const earRight = calculateEAR(rightEye);
-              const avgEAR = (earLeft + earRight) / 2;
-
-              if (avgEAR < 0.20) {
+              // Phát hiện chớp mắt (EAR < 0.23)
+              if (avgEAR < 0.23) {
                 hasBlinked = true;
                 playBeep(800, 0.1);
                 currentStep = 3;
@@ -278,6 +279,7 @@ export default function AttendancePage() {
               if (ratio < 0.6 || ratio > 1.6) {
                 hasTurnedHead = true;
                 clearInterval(scanInterval);
+                setCurrentEAR(null);
                 
                 setRegisterStep(4);
                 setRegisterProgress(100);
@@ -327,6 +329,7 @@ export default function AttendancePage() {
           setLivenessMessage('Quá thời gian xác thực. Không phát hiện chớp mắt!');
           setScanResult('ERROR');
           setIsScanning(false);
+          setCurrentEAR(null);
           return;
         }
 
@@ -346,13 +349,15 @@ export default function AttendancePage() {
             const earLeft = calculateEAR(leftEye);
             const earRight = calculateEAR(rightEye);
             const avgEAR = (earLeft + earRight) / 2;
+            setCurrentEAR(avgEAR);
 
-            if (avgEAR < 0.20) {
+            if (avgEAR < 0.23) {
               hasBlinked = true;
               setLivenessStatus('blinking');
               setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
               
               clearInterval(scanInterval);
+              setCurrentEAR(null);
               playBeep(900, 0.15);
 
               const image = captureFrame();
@@ -590,7 +595,7 @@ export default function AttendancePage() {
                       {/* Top status tag */}
                       <div className="absolute top-20 left-0 right-0 text-center z-20 pointer-events-none">
                         <div className="inline-block bg-black/70 backdrop-blur-md px-4 py-1.5 rounded-full text-[10px] font-black text-white border border-white/10 uppercase tracking-widest">
-                          TIẾN TRÌNH: {registerProgress}%
+                          TIẾN TRÌNH: {registerProgress}% {currentEAR !== null && ` | MẮT (EAR): ${currentEAR.toFixed(2)}`}
                         </div>
                       </div>
                     </>
@@ -598,7 +603,9 @@ export default function AttendancePage() {
 
                   {isScanning && livenessMessage && (
                     <div className="absolute bottom-6 left-6 right-6 bg-gray-950/90 backdrop-blur-md px-4 py-3 rounded-2xl border border-orange-500/30 text-center z-20 shadow-2xl">
-                      <p className="text-xs font-bold text-orange-400 animate-pulse">{livenessMessage}</p>
+                      <p className="text-xs font-bold text-orange-400 animate-pulse">
+                        {livenessMessage} {currentEAR !== null && `(EAR: ${currentEAR.toFixed(2)})`}
+                      </p>
                     </div>
                   )}
                   <div className="absolute top-6 left-6 flex items-center space-x-3">
