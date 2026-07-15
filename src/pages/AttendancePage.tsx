@@ -30,6 +30,7 @@ export default function AttendancePage() {
   const [registerProgress, setRegisterProgress] = useState(0);
   const [registerStep, setRegisterStep] = useState(0); // 0: idle, 1: look_straight, 2: blink, 3: turn_head, 4: done
   const [currentEAR, setCurrentEAR] = useState<number | null>(null);
+  const baselineEARRef = useRef<number>(0.28);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const playBeep = (freq = 600, duration = 0.1) => {
@@ -272,6 +273,7 @@ export default function AttendancePage() {
             
             if (currentStep === 1) {
               // Nhìn thẳng (Đã phát hiện khuôn mặt là OK)
+              baselineEARRef.current = avgEAR; // Lưu giá trị co mắt mở tiêu chuẩn của riêng người dùng
               playBeep(700, 0.1);
               currentStep = 2;
               setRegisterStep(2);
@@ -297,8 +299,9 @@ export default function AttendancePage() {
               }
             } 
             else if (currentStep === 3) {
-              // Phát hiện chớp mắt ở góc nhìn thẳng (EAR < 0.23)
-              if (avgEAR < 0.23) {
+              // Phát hiện chớp mắt với ngưỡng động (Baseline EAR - 0.04)
+              const blinkThreshold = Math.max(0.22, Math.min(0.26, baselineEARRef.current - 0.04));
+              if (avgEAR < blinkThreshold) {
                 clearInterval(scanInterval);
                 clearCanvas();
                 setCurrentEAR(null);
@@ -358,6 +361,9 @@ export default function AttendancePage() {
       let hasBlinked = false;
       let attempts = 0;
       const maxAttempts = 120; // 12 giây với chu kỳ 100ms
+      let checkinBaseline = 0.28;
+      let checkinFramesCount = 0;
+      let checkinBaselineSum = 0;
 
       const scanInterval = setInterval(async () => {
         attempts++;
@@ -403,7 +409,17 @@ export default function AttendancePage() {
             const avgEAR = (earLeft + earRight) / 2;
             setCurrentEAR(avgEAR);
 
-            if (avgEAR < 0.23) {
+            // Tính toán baseline mở mắt động ở 6 frame đầu tiên
+            if (checkinFramesCount < 6) {
+              checkinBaselineSum += avgEAR;
+              checkinFramesCount++;
+              checkinBaseline = checkinBaselineSum / checkinFramesCount;
+            }
+
+            // Ngưỡng chớp mắt động cho điểm danh
+            const blinkThreshold = Math.max(0.22, Math.min(0.26, checkinBaseline - 0.04));
+
+            if (avgEAR < blinkThreshold && checkinFramesCount >= 3) {
               hasBlinked = true;
               clearInterval(scanInterval);
               clearCanvas();
