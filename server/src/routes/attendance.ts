@@ -17,10 +17,10 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── POST /attendance — FaceID / QR Code self check-in (Student on own device) ──
+// ─── POST /attendance — FaceID / QR Code self check-in/out (Student on own device) ──
 router.post('/', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { eventId, method, faceImage, checkInDescriptor, latitude, longitude } = req.body;
+    const { eventId, method, faceImage, checkInDescriptor, latitude, longitude, type = 'IN' } = req.body;
     const userId = req.user?.userId;
 
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
@@ -82,21 +82,33 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
     }
 
     const existing = await prisma.attendance.findFirst({ where: { eventId, userId } });
-    if (existing) return res.status(400).json({ message: 'Bạn đã điểm danh cho sự kiện này rồi' });
 
-    const record = await prisma.attendance.create({
-      data: {
-        eventId,
-        userId,
-        method: method as any,
-        snapshotImage: method === 'FACEID' ? faceImage : null,
-        isValid: true,
-        latitude: latitude ?? null,
-        longitude: longitude ?? null,
-      }
-    });
+    if (type === 'IN') {
+      if (existing) return res.status(400).json({ message: 'Bạn đã check-in sự kiện này rồi' });
 
-    res.status(201).json(record);
+      const record = await prisma.attendance.create({
+        data: {
+          eventId,
+          userId,
+          method: method as any,
+          snapshotImage: method === 'FACEID' ? faceImage : null,
+          isValid: true,
+          latitude: latitude ?? null,
+          longitude: longitude ?? null,
+        }
+      });
+      return res.status(201).json({ message: 'Check-in thành công!', record });
+    } else {
+      // type === 'OUT'
+      if (!existing) return res.status(400).json({ message: 'Bạn chưa check-in sự kiện này, không thể check-out!' });
+      if (existing.checkoutTime) return res.status(400).json({ message: 'Bạn đã check-out sự kiện này rồi' });
+
+      const updated = await prisma.attendance.update({
+        where: { id: existing.id },
+        data: { checkoutTime: new Date() }
+      });
+      return res.json({ message: 'Check-out thành công!', record: updated });
+    }
   } catch (error) {
     console.error('Checkin error:', error);
     res.status(500).json({ message: 'Lỗi server' });

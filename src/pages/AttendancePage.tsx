@@ -535,12 +535,31 @@ export default function AttendancePage() {
           if (data.type === 'attendance' && data.eventId) {
             scanner.clear();
             setIsScanning(true);
+
+            let qrLat: number | null = null;
+            let qrLon: number | null = null;
+            if (navigator.geolocation) {
+              try {
+                const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+                  navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                });
+                qrLat = pos.coords.latitude;
+                qrLon = pos.coords.longitude;
+              } catch (e) {
+                console.warn('Không thể lấy vị trí cho quét QR:', e);
+              }
+            }
+
             try {
-              await api.post('/attendance', {
+              const res = await api.post('/attendance', {
                 eventId: data.eventId,
-                method: 'QR_CODE'
+                method: 'QR_CODE',
+                type: data.action || 'IN',
+                latitude: qrLat,
+                longitude: qrLon
               });
               setScanResult('SUCCESS');
+              alert(res.data.message || 'Điểm danh QR thành công!');
             } catch (err: any) {
               setScanResult('ERROR');
               alert(err.response?.data?.message || 'Lỗi điểm danh');

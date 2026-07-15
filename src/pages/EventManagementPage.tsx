@@ -42,6 +42,7 @@ export default function EventManagementPage() {
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [loadingRegs, setLoadingRegs] = useState(false);
   const [showQRForEvent, setShowQRForEvent] = useState<any>(null);
+  const [qrActionType, setQrActionType] = useState<'IN' | 'OUT'>('IN');
 
   useEffect(() => {
     fetchMyClubs();
@@ -634,17 +635,45 @@ export default function EventManagementPage() {
                  <QrCode className="w-8 h-8" />
                </div>
                <h3 className="text-2xl font-black text-gray-900 mb-2">QR Điểm danh</h3>
-               <p className="text-sm font-bold text-gray-500 mb-8 max-w-full truncate">{showQRForEvent.title}</p>
+               <p className="text-sm font-bold text-gray-500 mb-6 max-w-full truncate">{showQRForEvent.title}</p>
+               
+               {/* Bộ chuyển đổi Check-in / Check-out */}
+               <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 w-full">
+                 <button
+                   onClick={() => setQrActionType('IN')}
+                   className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
+                     qrActionType === 'IN'
+                       ? 'bg-purple-600 text-white shadow-md'
+                       : 'text-gray-500 hover:text-gray-800'
+                   }`}
+                 >
+                   📥 Check-in (Vào)
+                 </button>
+                 <button
+                   onClick={() => setQrActionType('OUT')}
+                   className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
+                     qrActionType === 'OUT'
+                       ? 'bg-purple-600 text-white shadow-md'
+                       : 'text-gray-500 hover:text-gray-800'
+                   }`}
+                 >
+                   📤 Check-out (Ra)
+                 </button>
+               </div>
                
                <div className="bg-white p-4 rounded-3xl shadow-lg border border-gray-100 inline-block mb-6">
                  <QRCode 
-                   value={JSON.stringify({ eventId: showQRForEvent.id, type: 'attendance' })} 
+                   value={JSON.stringify({ 
+                     eventId: showQRForEvent.id, 
+                     type: 'attendance',
+                     action: qrActionType 
+                   })} 
                    size={200}
                    level="H"
                  />
                </div>
                
-               <p className="text-xs text-gray-400">Sinh viên sử dụng App HUTECH CLB <br/>để quét mã này điểm danh.</p>
+               <p className="text-xs text-gray-400">Thành viên sử dụng App HUTECH CLB quét mã này để {qrActionType === 'IN' ? 'Check-in (Vào)' : 'Check-out (Ra)'}.</p>
             </motion.div>
           </motion.div>
         )}
