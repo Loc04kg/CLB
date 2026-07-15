@@ -24,6 +24,56 @@ export default function AttendancePage() {
   // Liveness (Blink Detection) state
   const [livenessStatus, setLivenessStatus] = useState<'idle' | 'waiting' | 'blinking' | 'success' | 'failed'>('idle');
   const [livenessMessage, setLivenessMessage] = useState('');
+  
+  // iPhone-style FaceID registration states
+  const [registerProgress, setRegisterProgress] = useState(0);
+  const [registerStep, setRegisterStep] = useState(0); // 0: idle, 1: look_straight, 2: blink, 3: turn_head, 4: done
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const playBeep = (freq = 600, duration = 0.1) => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {
+      console.warn('Audio Context failed:', e);
+    }
+  };
+
+  const playSuccessChime = () => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const now = ctx.currentTime;
+      
+      const playTone = (freq: number, start: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.2, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+        osc.start(start);
+        osc.stop(start + duration);
+      };
+      
+      playTone(523.25, now, 0.15);       // C5
+      playTone(659.25, now + 0.1, 0.15); // E5
+      playTone(783.99, now + 0.2, 0.15); // G5
+      playTone(1046.50, now + 0.3, 0.3); // C6
+    } catch (e) {
+      console.warn('Success chime failed:', e);
+    }
+  };
 
   // GPS state
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -134,8 +184,6 @@ export default function AttendancePage() {
 
     setIsScanning(true);
     setScanResult(null);
-    setLivenessStatus('waiting');
-    setLivenessMessage('Nhìn thẳng camera và CHỚP MẮT 1 lần để xác thực...');
 
     let lat: number | null = null;
     let lon: number | null = null;
@@ -155,78 +203,185 @@ export default function AttendancePage() {
       }
     }
 
-    let hasBlinked = false;
-    let attempts = 0;
-    const maxAttempts = 60; // Thử quét trong tối đa ~12 giây (mỗi lần cách nhau 200ms)
+    if (mode === 'REGISTER') {
+      setRegisterStep(1);
+      setRegisterProgress(0);
+      setLivenessStatus('waiting');
+      setLivenessMessage('Bước 1/3: Nhìn thẳng vào khung tròn để bắt đầu...');
+      playBeep(600, 0.1);
 
-    const scanInterval = setInterval(async () => {
-      attempts++;
-      if (attempts > maxAttempts && !hasBlinked) {
-        clearInterval(scanInterval);
-        setLivenessStatus('failed');
-        setLivenessMessage('Quá thời gian xác thực. Không phát hiện chớp mắt!');
-        setScanResult('ERROR');
-        setIsScanning(false);
-        return;
-      }
+      let currentStep = 1;
+      let hasBlinked = false;
+      let hasTurnedHead = false;
+      let attempts = 0;
+      const maxAttempts = 100; // ~20 giây tối đa
 
-      if (!videoRef.current) return;
+      const scanInterval = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+          clearInterval(scanInterval);
+          setLivenessStatus('failed');
+          setLivenessMessage('Quá thời gian đăng ký FaceID!');
+          setScanResult('ERROR');
+          setIsScanning(false);
+          setRegisterStep(0);
+          setRegisterProgress(0);
+          return;
+        }
 
-      try {
-        const detection = await faceapi.detectSingleFace(
-          videoRef.current,
-          new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
-        ).withFaceLandmarks().withFaceDescriptor();
+        if (!videoRef.current) return;
 
-        if (detection) {
-          const landmarks = detection.landmarks;
-          const leftEye = landmarks.getLeftEye();
-          const rightEye = landmarks.getRightEye();
+        try {
+          const detection = await faceapi.detectSingleFace(
+            videoRef.current,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+          ).withFaceLandmarks().withFaceDescriptor();
 
-          const earLeft = calculateEAR(leftEye);
-          const earRight = calculateEAR(rightEye);
-          const avgEAR = (earLeft + earRight) / 2;
-
-          // Nếu chỉ số EAR nhỏ hơn 0.20 tức là mắt nhắm/chớp mắt
-          if (avgEAR < 0.20) {
-            hasBlinked = true;
-            setLivenessStatus('blinking');
-            setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
+          if (detection) {
+            const landmarks = detection.landmarks;
             
-            clearInterval(scanInterval);
+            if (currentStep === 1) {
+              // Nhìn thẳng (Đã phát hiện khuôn mặt là OK)
+              playBeep(700, 0.1);
+              currentStep = 2;
+              setRegisterStep(2);
+              setRegisterProgress(35);
+              setLivenessMessage('Bước 2/3: Hãy CHỚP MẮT 1 lần để xác thực...');
+            } 
+            else if (currentStep === 2) {
+              // Phát hiện chớp mắt (EAR < 0.20)
+              const leftEye = landmarks.getLeftEye();
+              const rightEye = landmarks.getRightEye();
+              const earLeft = calculateEAR(leftEye);
+              const earRight = calculateEAR(rightEye);
+              const avgEAR = (earLeft + earRight) / 2;
 
-            // Chụp frame ảnh thời điểm chớp mắt thành công
-            const image = captureFrame();
-            const descriptorArr = Array.from(detection.descriptor);
+              if (avgEAR < 0.20) {
+                hasBlinked = true;
+                playBeep(800, 0.1);
+                currentStep = 3;
+                setRegisterStep(3);
+                setRegisterProgress(70);
+                setLivenessMessage('Bước 3/3: Quay đầu nhẹ sang trái/phải để quét góc...');
+              }
+            } 
+            else if (currentStep === 3) {
+              // Phát hiện quay đầu (khoảng cách mũi tới viền hàm 2 bên bất cân xứng)
+              const nose = landmarks.getNose()[3]; // đỉnh mũi
+              const jaw = landmarks.getJawOutline();
+              const leftJaw = jaw[0];
+              const rightJaw = jaw[16];
+              const distLeft = Math.sqrt(Math.pow(nose.x - leftJaw.x, 2) + Math.pow(nose.y - leftJaw.y, 2));
+              const distRight = Math.sqrt(Math.pow(nose.x - rightJaw.x, 2) + Math.pow(nose.y - rightJaw.y, 2));
+              const ratio = distLeft / distRight;
 
-            // Gửi dữ liệu đăng ký hoặc điểm danh lên Server
-            try {
-              if (mode === 'REGISTER') {
-                await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
-              } else {
+              if (ratio < 0.6 || ratio > 1.6) {
+                hasTurnedHead = true;
+                clearInterval(scanInterval);
+                
+                setRegisterStep(4);
+                setRegisterProgress(100);
+                setLivenessStatus('blinking');
+                setLivenessMessage('Hoàn tất quét FaceID! Đang lưu thông tin...');
+                playSuccessChime();
+
+                const image = captureFrame();
+                const descriptorArr = Array.from(detection.descriptor);
+
+                try {
+                  await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
+                  setLivenessStatus('success');
+                  setLivenessMessage('Đăng ký FaceID thành công!');
+                  setScanResult('SUCCESS');
+                } catch (err: any) {
+                  setLivenessStatus('failed');
+                  setLivenessMessage(err.response?.data?.message || 'Lỗi lưu thông tin FaceID');
+                  setScanResult('ERROR');
+                } finally {
+                  setIsScanning(false);
+                  setRegisterStep(0);
+                  setRegisterProgress(0);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Registration scan error:', err);
+        }
+      }, 200);
+
+    } else {
+      // CHECKIN MODE (Chỉ cần chớp mắt xác thực thực thể sống)
+      setLivenessStatus('waiting');
+      setLivenessMessage('Nhìn thẳng camera và CHỚP MẮT 1 lần để xác thực...');
+
+      let hasBlinked = false;
+      let attempts = 0;
+      const maxAttempts = 60; 
+
+      const scanInterval = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts && !hasBlinked) {
+          clearInterval(scanInterval);
+          setLivenessStatus('failed');
+          setLivenessMessage('Quá thời gian xác thực. Không phát hiện chớp mắt!');
+          setScanResult('ERROR');
+          setIsScanning(false);
+          return;
+        }
+
+        if (!videoRef.current) return;
+
+        try {
+          const detection = await faceapi.detectSingleFace(
+            videoRef.current,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+          ).withFaceLandmarks().withFaceDescriptor();
+
+          if (detection) {
+            const landmarks = detection.landmarks;
+            const leftEye = landmarks.getLeftEye();
+            const rightEye = landmarks.getRightEye();
+
+            const earLeft = calculateEAR(leftEye);
+            const earRight = calculateEAR(rightEye);
+            const avgEAR = (earLeft + earRight) / 2;
+
+            if (avgEAR < 0.20) {
+              hasBlinked = true;
+              setLivenessStatus('blinking');
+              setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
+              
+              clearInterval(scanInterval);
+              playBeep(900, 0.15);
+
+              const image = captureFrame();
+              const descriptorArr = Array.from(detection.descriptor);
+
+              try {
                 await api.post('/attendance', {
                   eventId: selectedEventId, method: 'FACEID',
                   faceImage: image, checkInDescriptor: JSON.stringify(descriptorArr),
                   latitude: lat, longitude: lon
                 });
+                setLivenessStatus('success');
+                setLivenessMessage('Xác thực thực thể sống thành công!');
+                setScanResult('SUCCESS');
+              } catch (err: any) {
+                setLivenessStatus('failed');
+                setLivenessMessage(err.response?.data?.message || 'Lỗi xử lý xác thực');
+                setScanResult('ERROR');
+                if (err.response?.data?.message) alert(err.response.data.message);
+              } finally {
+                setIsScanning(false);
               }
-              setLivenessStatus('success');
-              setLivenessMessage('Xác thực thực thể sống thành công!');
-              setScanResult('SUCCESS');
-            } catch (err: any) {
-              setLivenessStatus('failed');
-              setLivenessMessage(err.response?.data?.message || 'Lỗi xử lý xác thực');
-              setScanResult('ERROR');
-              if (err.response?.data?.message) alert(err.response.data.message);
-            } finally {
-              setIsScanning(false);
             }
           }
+        } catch (err) {
+          console.error('Liveness scan error:', err);
         }
-      } catch (err) {
-        console.error('Liveness scan error:', err);
-      }
-    }, 200);
+      }, 200);
+    }
   };
 
   const fetchMyAttendance = async () => {
@@ -359,9 +514,13 @@ export default function AttendancePage() {
                   <AnimatePresence>
                     {isScanning && (
                       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-20 pointer-events-none">
-                        <motion.div initial={{ top: '0%' }} animate={{ top: '100%' }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                          className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500 to-transparent shadow-[0_0_20px_rgba(249,115,22,0.8)]" />
-                        <div className="absolute inset-16 border-2 border-orange-500/50 rounded-full animate-pulse"></div>
+                        {mode !== 'REGISTER' && (
+                          <>
+                            <motion.div initial={{ top: '0%' }} animate={{ top: '100%' }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                              className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-orange-500 to-transparent shadow-[0_0_20px_rgba(249,115,22,0.8)]" />
+                            <div className="absolute inset-16 border-2 border-orange-500/50 rounded-full animate-pulse"></div>
+                          </>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -395,6 +554,48 @@ export default function AttendancePage() {
                   </AnimatePresence>
 
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+
+                  {/* Spotlight Circle Mask and Apple progress ring for REGISTER mode */}
+                  {mode === 'REGISTER' && isScanning && (
+                    <>
+                      {/* Spotlight Mask */}
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 animate-fade-in" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <defs>
+                          <mask id="circle-mask">
+                            <rect x="0" y="0" width="100" height="100" fill="white" />
+                            <circle cx="50" cy="50" r="35" fill="black" />
+                          </mask>
+                        </defs>
+                        <rect x="0" y="0" width="100" height="100" fill="rgba(3, 7, 18, 0.75)" mask="url(#circle-mask)" />
+                        <circle cx="50" cy="50" r="35" fill="none" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="1.5" />
+                      </svg>
+
+                      {/* iPhone FaceID animated green progress ring */}
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none z-20" viewBox="0 0 100 100">
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="35"
+                          fill="none"
+                          stroke="#10b981" // Emerald green
+                          strokeWidth="2.5"
+                          strokeDasharray="219.9" // 2 * Math.PI * 35
+                          strokeDashoffset={219.9 - (219.9 * registerProgress) / 100}
+                          strokeLinecap="round"
+                          className="transition-all duration-300 ease-out"
+                          transform="rotate(-90 50 50)"
+                        />
+                      </svg>
+
+                      {/* Top status tag */}
+                      <div className="absolute top-20 left-0 right-0 text-center z-20 pointer-events-none">
+                        <div className="inline-block bg-black/70 backdrop-blur-md px-4 py-1.5 rounded-full text-[10px] font-black text-white border border-white/10 uppercase tracking-widest">
+                          TIẾN TRÌNH: {registerProgress}%
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   {isScanning && livenessMessage && (
                     <div className="absolute bottom-6 left-6 right-6 bg-gray-950/90 backdrop-blur-md px-4 py-3 rounded-2xl border border-orange-500/30 text-center z-20 shadow-2xl">
                       <p className="text-xs font-bold text-orange-400 animate-pulse">{livenessMessage}</p>
