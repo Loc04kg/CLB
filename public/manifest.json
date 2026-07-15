@@ -1,0 +1,18 @@
+{
+  "name": "HUTECH Câu Lạc Bộ",
+  "short_name": "HUTECH CLB",
+  "description": "Ứng dụng hỗ trợ kết nối và tuyển dụng câu lạc bộ trường Đại học HUTECH",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "icons": [
+    {
+      "src": "/pwa-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
