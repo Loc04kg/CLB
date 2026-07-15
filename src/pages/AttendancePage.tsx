@@ -21,6 +21,10 @@ export default function AttendancePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
+  // Liveness (Blink Detection) state
+  const [livenessStatus, setLivenessStatus] = useState<'idle' | 'waiting' | 'blinking' | 'success' | 'failed'>('idle');
+  const [livenessMessage, setLivenessMessage] = useState('');
+
   // GPS state
   const [gpsStatus, setGpsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [gpsMessage, setGpsMessage] = useState('');
@@ -114,13 +118,24 @@ export default function AttendancePage() {
     return canvas.toDataURL('image/jpeg', 0.8);
   };
 
+  // Tính tỷ lệ co mắt (Eye Aspect Ratio) để phát hiện chớp mắt
+  const calculateEAR = (eyePoints: faceapi.Point[]) => {
+    const dist26 = Math.sqrt(Math.pow(eyePoints[1].x - eyePoints[5].x, 2) + Math.pow(eyePoints[1].y - eyePoints[5].y, 2));
+    const dist35 = Math.sqrt(Math.pow(eyePoints[2].x - eyePoints[4].x, 2) + Math.pow(eyePoints[2].y - eyePoints[4].y, 2));
+    const dist14 = Math.sqrt(Math.pow(eyePoints[0].x - eyePoints[3].x, 2) + Math.pow(eyePoints[0].y - eyePoints[3].y, 2));
+    return (dist26 + dist35) / (2.0 * dist14);
+  };
+
   const handleScan = async () => {
     if (!user) return;
-    if (mode === 'CHECKIN' && !selectedEventId) return alert('Vui long chon su kien');
-    if (!modelsLoaded) return alert('He thong AI dang khoi dong...');
+    if (mode === 'CHECKIN' && !selectedEventId) return alert('Vui lòng chọn sự kiện');
+    if (!modelsLoaded) return alert('Hệ thống AI đang khởi động...');
+    if (!videoRef.current) return alert('Camera không hoạt động');
 
     setIsScanning(true);
     setScanResult(null);
+    setLivenessStatus('waiting');
+    setLivenessMessage('Nhìn thẳng camera và CHỚP MẮT 1 lần để xác thực...');
 
     let lat: number | null = null;
     let lon: number | null = null;
@@ -135,54 +150,83 @@ export default function AttendancePage() {
         lon = pos.coords.longitude;
         setLocationName(`Toạ độ: ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
       } catch (err: any) {
-        console.warn('Khong the lay GPS tu dong:', err);
-        let errorMsg = 'Lỗi lấy GPS';
-        if (err.code === 1) errorMsg = 'Chưa cấp quyền GPS';
-        else if (err.code === 2) errorMsg = 'Mất tín hiệu GPS';
-        else if (err.code === 3) errorMsg = 'Quá thời gian lấy GPS';
-        setLocationName(`${errorMsg} (Bỏ qua)`);
+        console.warn('Khong the lay GPS:', err);
+        setLocationName('Lỗi lấy GPS (Bỏ qua)');
       }
     }
 
-    const image = captureFrame();
+    let hasBlinked = false;
+    let attempts = 0;
+    const maxAttempts = 60; // Thử quét trong tối đa ~12 giây (mỗi lần cách nhau 200ms)
 
-    let descriptorArr = null;
-    try {
-      const img = new Image();
-      img.src = image || '';
-      await new Promise(r => { img.onload = r; });
-      const detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.25 }))
-        .withFaceLandmarks().withFaceDescriptor();
-      if (!detection) {
+    const scanInterval = setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts && !hasBlinked) {
+        clearInterval(scanInterval);
+        setLivenessStatus('failed');
+        setLivenessMessage('Quá thời gian xác thực. Không phát hiện chớp mắt!');
         setScanResult('ERROR');
-        alert('AI không tìm thấy khuôn mặt! Vui lòng đưa mặt vào giữa khung hình và đảm bảo đủ ánh sáng. (Đã giảm độ khó xuống 0.25)');
         setIsScanning(false);
         return;
       }
-      descriptorArr = Array.from(detection.descriptor);
-    } catch (e) {
-      setScanResult('ERROR');
-      setIsScanning(false);
-      return;
-    }
 
-    try {
-      if (mode === 'REGISTER') {
-        await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
-      } else {
-        await api.post('/attendance', {
-          eventId: selectedEventId, method: 'FACEID',
-          faceImage: image, checkInDescriptor: JSON.stringify(descriptorArr),
-          latitude: lat, longitude: lon
-        });
+      if (!videoRef.current) return;
+
+      try {
+        const detection = await faceapi.detectSingleFace(
+          videoRef.current,
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+        ).withFaceLandmarks().withFaceDescriptor();
+
+        if (detection) {
+          const landmarks = detection.landmarks;
+          const leftEye = landmarks.getLeftEye();
+          const rightEye = landmarks.getRightEye();
+
+          const earLeft = calculateEAR(leftEye);
+          const earRight = calculateEAR(rightEye);
+          const avgEAR = (earLeft + earRight) / 2;
+
+          // Nếu chỉ số EAR nhỏ hơn 0.20 tức là mắt nhắm/chớp mắt
+          if (avgEAR < 0.20) {
+            hasBlinked = true;
+            setLivenessStatus('blinking');
+            setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
+            
+            clearInterval(scanInterval);
+
+            // Chụp frame ảnh thời điểm chớp mắt thành công
+            const image = captureFrame();
+            const descriptorArr = Array.from(detection.descriptor);
+
+            // Gửi dữ liệu đăng ký hoặc điểm danh lên Server
+            try {
+              if (mode === 'REGISTER') {
+                await api.put(`/users/${user.id}`, { faceImage: image, faceDescriptor: JSON.stringify(descriptorArr) });
+              } else {
+                await api.post('/attendance', {
+                  eventId: selectedEventId, method: 'FACEID',
+                  faceImage: image, checkInDescriptor: JSON.stringify(descriptorArr),
+                  latitude: lat, longitude: lon
+                });
+              }
+              setLivenessStatus('success');
+              setLivenessMessage('Xác thực thực thể sống thành công!');
+              setScanResult('SUCCESS');
+            } catch (err: any) {
+              setLivenessStatus('failed');
+              setLivenessMessage(err.response?.data?.message || 'Lỗi xử lý xác thực');
+              setScanResult('ERROR');
+              if (err.response?.data?.message) alert(err.response.data.message);
+            } finally {
+              setIsScanning(false);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Liveness scan error:', err);
       }
-      setScanResult('SUCCESS');
-    } catch (err: any) {
-      setScanResult('ERROR');
-      if (err.response?.data?.message) alert(err.response.data.message);
-    } finally {
-      setIsScanning(false);
-    }
+    }, 200);
   };
 
   const fetchMyAttendance = async () => {
@@ -349,7 +393,13 @@ export default function AttendancePage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  {isScanning && livenessMessage && (
+                    <div className="absolute bottom-6 left-6 right-6 bg-gray-950/90 backdrop-blur-md px-4 py-3 rounded-2xl border border-orange-500/30 text-center z-20 shadow-2xl">
+                      <p className="text-xs font-bold text-orange-400 animate-pulse">{livenessMessage}</p>
+                    </div>
+                  )}
                   <div className="absolute top-6 left-6 flex items-center space-x-3">
                     <div className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/10">
                       <Scan className="w-5 h-5 text-orange-500" />
