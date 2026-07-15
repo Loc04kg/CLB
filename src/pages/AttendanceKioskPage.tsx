@@ -154,7 +154,7 @@ export default function AttendanceKioskPage() {
         if (dist < bestDist) { bestDist = dist; bestMatch = kf; }
       }
 
-      if (bestMatch && bestDist < 0.45 && !cooldownRef.current.has(bestMatch.userId)) {
+      if (bestMatch && bestDist < 0.40 && !cooldownRef.current.has(bestMatch.userId)) {
         cooldownRef.current.add(bestMatch.userId);
         setTimeout(() => cooldownRef.current.delete(bestMatch!.userId), 10000);
 

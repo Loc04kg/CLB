@@ -54,7 +54,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res) => {
         let distance = 0;
         for (let i = 0; i < 128; i++) distance += (savedDesc[i] - checkInDesc[i]) ** 2;
         distance = Math.sqrt(distance);
-        if (distance >= 0.55) {
+        if (distance >= 0.40) {
           return res.status(403).json({ message: `Khuôn mặt không khớp (Sai số: ${distance.toFixed(2)}). Điểm danh thất bại!` });
         }
       } catch {
