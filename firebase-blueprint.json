@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Thông tin người dùng/sinh viên trong hệ thống",
+      "type": "object",
+      "properties": {
+        "student_id": { "type": "string", "description": "Mã số sinh viên" },
+        "name": { "type": "string", "description": "Họ và tên" },
+        "email": { "type": "string", "description": "Email sinh viên hutech" },
+        "role": { "type": "string", "enum": ["ADMIN", "LEADER", "MEMBER", "STUDENT"] },
+        "face_image": { "type": "string", "description": "Dữ liệu khuôn mặt base64 hoặc URL" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["student_id", "name", "email", "role"]
+    },
+    "Club": {
+      "title": "Club",
+      "description": "Thông tin câu lạc bộ",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "founder_id": { "type": "string", "description": "ID người tạo (Leader)" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "logo_url": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "founder_id", "status"]
+    },
+    "ClubMember": {
+      "title": "ClubMember",
+      "description": "Thành viên tham gia CLB",
+      "type": "object",
+      "properties": {
+        "club_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "role": { "type": "string", "enum": ["LEADER", "MEMBER"] },
+        "join_date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["club_id", "user_id", "role"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Sự kiện của CLB",
+      "type": "object",
+      "properties": {
+        "club_id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "location": { "type": "string" },
+        "event_date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["club_id", "title", "status"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Dữ liệu điểm danh",
+      "type": "object",
+      "properties": {
+        "event_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "checkin_time": { "type": "string", "format": "date-time" },
+        "method": { "type": "string", "enum": ["FACEID", "MANUAL"] }
+      },
+      "required": ["event_id", "user_id", "checkin_time", "method"]
+    },
+    "AI_Log": {
+      "title": "AI_Log",
+      "description": "Lịch sử dùng AI trợ lý",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "question": { "type": "string" },
+        "answer": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "Dữ liệu sinh viên" },
+    "clubs": { "schema": "Club", "description": "Danh sách CLB" },
+    "clubs/{clubId}/members": { "schema": "ClubMember", "description": "Thành viên của CLB" },
+    "events": { "schema": "Event", "description": "Sự kiện trường/CLB" },
+    "attendance": { "schema": "Attendance", "description": "Kết quả điểm danh" },
+    "ai_logs": { "schema": "AI_Log", "description": "Ghi nhận AI" }
+  }
+}

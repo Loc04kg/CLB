@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  LEADER
+  MEMBER
+  STUDENT
+}
+
+enum Status {
+  PENDING
+  APPROVED
+  REJECTED
+  DRAFT
+}
+
+enum MemberRole {
+  LEADER
+  MEMBER
+}
+
+enum AttendanceMethod {
+  FACEID
+  MANUAL
+  FINGERPRINT
+  QR_CODE
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+model User {
+  id             String     @id @default(uuid())
+  studentId      String     @unique @map("student_id")
+  name           String
+  email          String     @unique
+  password       String
+  role           Role       @default(STUDENT)
+  status         UserStatus @default(ACTIVE)
+  faceImage      String?    @map("face_image") @db.LongText
+  faceDescriptor String?    @map("face_descriptor") @db.LongText
+  major          String?    @map("major")
+  interests      String?    @map("interests") @db.Text
+  skills         String?    @map("skills") @db.Text
+  bio            String?    @map("bio") @db.Text
+  phone          String?
+  address        String?
+  className      String?    @map("class_name")
+  dateOfBirth    String?    @map("date_of_birth")
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  foundedClubs       Club[]                      @relation("ClubFounder")
+  memberships        ClubMember[]
+  attendances        Attendance[]
+  aiLogs             AILog[]
+  deptMemberships    DepartmentMember[]
+  eventRegistrations EventRegistration[]
+  comments           Comment[]
+  notifications      Notification[]
+  transfersFrom      LeadershipTransferRequest[] @relation("TransferFrom")
+  transfersTo        LeadershipTransferRequest[] @relation("TransferTo")
+  assignedTasks      Task[]
+  fundTransactions   FundTransaction[]
+  authenticators     Authenticator[]
+  reactions          PostReaction[]
+
+  @@map("users")
+}
+
+model Club {
+  id          String   @id @default(uuid())
+  name        String
+  description String?  @db.Text
+  category    String?
+  founderId   String?  @map("founder_id")
+  status      Status   @default(PENDING)
+  logoUrl     String?  @map("logo_url") @db.LongText
+  coverUrl    String?  @map("cover_url") @db.LongText
+  facebookUrl String?  @map("facebook_url")
+  zaloUrl     String?  @map("zalo_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  founder             User?                       @relation("ClubFounder", fields: [founderId], references: [id])
+  members             ClubMember[]
+  events              Event[]
+  departments         Department[]
+  posts               Post[]
+  leadershipTransfers LeadershipTransferRequest[]
+  tasks               Task[]
+  fundTransactions    FundTransaction[]
+
+  @@map("clubs")
+}
+
+model ClubMember {
+  id          String     @id @default(uuid())
+  clubId      String     @map("club_id")
+  userId      String     @map("user_id")
+  role        MemberRole @default(MEMBER)
+  customTitle String?    @map("custom_title")
+  status      Status     @default(PENDING)
+  joinDate    DateTime   @default(now()) @map("join_date")
+
+  // Recruitment application form details
+  fullName    String?    @map("full_name")
+  studentId   String?    @map("student_id")
+  className   String?    @map("class_name")
+  address     String?
+  phone       String?
+  dateOfBirth String?    @map("date_of_birth")
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("club_members")
+}
+
+model Department {
+  id     String @id @default(uuid())
+  clubId String @map("club_id")
+  name   String
+
+  club    Club               @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  members DepartmentMember[]
+
+  @@map("departments")
+}
+
+model DepartmentMember {
+  id           String @id @default(uuid())
+  departmentId String @map("department_id")
+  userId       String @map("user_id")
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("department_members")
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  clubId      String   @map("club_id")
+  title       String
+  description String?  @db.Text
+  location    String?
+  eventDate   DateTime @map("event_date")
+  status      Status   @default(PENDING)
+  imageUrl    String?  @map("image_url") @db.LongText
+  latitude    Float?   @map("latitude")
+  longitude   Float?   @map("longitude")
+  maxCapacity Int?     @map("max_capacity")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  club          Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  attendances   Attendance[]
+  registrations EventRegistration[]
+
+  @@map("events")
+}
+
+model EventRegistration {
+  id        String   @id @default(uuid())
+  eventId   String   @map("event_id")
+  userId    String   @map("user_id")
+  status    Status   @default(PENDING)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("event_registrations")
+}
+
+model Attendance {
+  id            String           @id @default(uuid())
+  eventId       String           @map("event_id")
+  userId        String           @map("user_id")
+  checkinTime   DateTime         @default(now()) @map("checkin_time")
+  checkoutTime  DateTime?        @map("checkout_time")
+  method        AttendanceMethod @default(MANUAL)
+  snapshotImage String?          @map("snapshot_image") @db.LongText
+  isValid       Boolean?
+  latitude      Float?           @map("latitude")
+  longitude     Float?           @map("longitude")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  clubId    String   @map("club_id")
+  title     String
+  content   String   @db.Text
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  club      Club           @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+  reactions PostReaction[]
+
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String   @db.Text
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AILog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  question  String   @db.Text
+  answer    String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_logs")
+}
+
+model LeadershipTransferRequest {
+  id         String   @id @default(uuid())
+  clubId     String   @map("club_id")
+  fromUserId String   @map("from_user_id")
+  toUserId   String   @map("to_user_id")
+  status     Status   @default(PENDING)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  club     Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  fromUser User @relation("TransferFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User @relation("TransferTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@map("leadership_transfers")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+model Task {
+  id          String     @id @default(uuid())
+  clubId      String     @map("club_id")
+  title       String
+  description String?    @db.Text
+  assigneeId  String?    @map("assignee_id")
+  status      TaskStatus @default(TODO)
+  deadline    DateTime?
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  club     Club  @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  assignee User? @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@map("tasks")
+}
+
+model FundTransaction {
+  id          String          @id @default(uuid())
+  clubId      String          @map("club_id")
+  amount      Float
+  type        TransactionType
+  description String
+  date        DateTime        @default(now())
+  memberId    String?         @map("member_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  club   Club  @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  member User? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@map("fund_transactions")
+}
+
+model ChatMessage {
+  id                String   @id @default(uuid())
+  senderId          String   @map("sender_id")
+  senderName        String   @map("sender_name")
+  receiverId        String?  @map("receiver_id")
+  clubId            String?  @map("club_id")
+  clubName          String?  @map("club_name")
+  message           String   @db.Text
+  isFromAdmin       Boolean  @default(false) @map("is_from_admin")
+  isFromClubManager Boolean  @default(false) @map("is_from_club_manager")
+  isAI              Boolean  @default(false) @map("is_ai")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}
+
+model Authenticator {
+  credentialID         String  @id @map("credential_id")
+  credentialPublicKey  Bytes   @map("credential_public_key")
+  counter              BigInt
+  credentialDeviceType String  @map("credential_device_type")
+  credentialBackedUp   Boolean @map("credential_backed_up")
+  transports           String?
+  
+  userId               String  @map("user_id")
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("authenticators")
+}
+
+model PostReaction {
+  id        String   @id @default(uuid())
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  type      String   @default("LIKE") // "LIKE", "HEART", "HAHA"
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@map("post_reactions")
+}

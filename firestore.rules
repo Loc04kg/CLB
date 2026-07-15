@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isHutechEmail() {
+      return request.auth.token.email.endsWith('@hutech.edu.vn') || 
+             request.auth.token.email.endsWith('.hutech.edu.vn');
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function getExistingData() {
+      return resource.data;
+    }
+
+    function getIncomingData() {
+      return request.resource.data;
+    }
+
+    function isAdmin() {
+      // For this app, we check if the user is in the 'users' collection with role ADMIN
+      // and their email is verified and they have a hutech email.
+      // We use get() on the users collection.
+      return isSignedIn() && isEmailVerified() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['student_id', 'name', 'email', 'role', 'created_at']) &&
+             data.keys().size() == 5 &&
+             data.student_id is string && data.student_id.size() >= 3 && data.student_id.size() <= 20 &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+             data.email == request.auth.token.email &&
+             data.role == 'STUDENT' && 
+             data.created_at == request.time;
+    }
+
+    function isValidClub(data) {
+      return data.keys().hasAll(['name', 'description', 'founder_id', 'status', 'created_at']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.founder_id == request.auth.uid &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             data.created_at == request.time;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['club_id', 'title', 'description', 'location', 'event_date', 'status', 'created_at']) &&
+             data.club_id is string &&
+             data.title is string && data.title.size() <= 200 &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+             data.created_at == request.time;
+    }
+
+    // --- Collection Routes ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(getIncomingData()) && 
+                    getIncomingData().role == 'STUDENT'; // Self-register only as Student
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && getIncomingData().diff(getExistingData()).affectedKeys().hasOnly(['name', 'face_image'])) ||
+        (isAdmin() && getIncomingData().diff(getExistingData()).affectedKeys().hasOnly(['role']))
+      );
+    }
+
+    match /clubs/{clubId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isEmailVerified() && isValidClub(getIncomingData()) && getIncomingData().status == 'PENDING';
+      allow update: if isSignedIn() && (
+        (isAdmin() && getIncomingData().diff(getExistingData()).affectedKeys().hasOnly(['status'])) ||
+        (getExistingData().founder_id == request.auth.uid && getIncomingData().diff(getExistingData()).affectedKeys().hasOnly(['name', 'description', 'logo_url']))
+      );
+    }
+
+    match /clubs/{clubId}/members/{memberId} {
+      allow read: if isSignedIn(); // Or restrict to club visibility
+      allow write: if isAdmin() || (isSignedIn() && get(/databases/$(database)/documents/clubs/$(clubId)).data.founder_id == request.auth.uid);
+    }
+
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isEmailVerified() && isValidEvent(getIncomingData()) && getIncomingData().status == 'PENDING';
+      allow update: if isAdmin() || (isSignedIn() && get(/databases/$(database)/documents/clubs/$(getExistingData().club_id)).data.founder_id == request.auth.uid);
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn() && (isAdmin() || request.auth.uid == getExistingData().user_id);
+      allow create: if isSignedIn() && isEmailVerified() && getIncomingData().user_id == request.auth.uid;
+    }
+
+    match /ai_logs/{logId} {
+      allow read: if isSignedIn() && (isAdmin() || request.auth.uid == getExistingData().user_id);
+      allow create: if isSignedIn() && getIncomingData().user_id == request.auth.uid;
+    }
+  }
+}

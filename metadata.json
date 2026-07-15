@@ -1,0 +1,6 @@
+{
+  "name": "HUTECH Student Clubs",
+  "description": "Hệ thống quản lý toàn diện Câu lạc bộ sinh viên HUTECH với tính năng AI hỗ trợ và điểm danh FaceID.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
