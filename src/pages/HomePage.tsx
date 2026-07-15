@@ -103,9 +103,6 @@ export default function HomePage() {
                 <button className="w-full sm:w-auto px-8 py-4 bg-orange-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl hover:bg-orange-700 transition-all active:scale-95 flex justify-center items-center gap-3">
                   Khám phá ngay <ArrowRight className="w-5 h-5" />
                 </button>
-                <button className="w-full sm:w-auto px-8 py-4 bg-white/10 backdrop-blur-md border border-white/20 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-white/20 transition-all text-center">
-                  Xem Video
-                </button>
               </div>
             </div>
           </motion.div>
