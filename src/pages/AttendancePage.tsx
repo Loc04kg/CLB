@@ -19,6 +19,7 @@ export default function AttendancePage() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<null | 'SUCCESS' | 'ERROR'>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
   // Liveness (Blink Detection) state
@@ -183,6 +184,14 @@ export default function AttendancePage() {
     if (!modelsLoaded) return alert('Hệ thống AI đang khởi động...');
     if (!videoRef.current) return alert('Camera không hoạt động');
 
+    const clearCanvas = () => {
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    };
+
+    clearCanvas();
     setIsScanning(true);
     setScanResult(null);
 
@@ -221,6 +230,7 @@ export default function AttendancePage() {
         attempts++;
         if (attempts > maxAttempts) {
           clearInterval(scanInterval);
+          clearCanvas();
           setLivenessStatus('failed');
           setLivenessMessage('Quá thời gian đăng ký FaceID!');
           setScanResult('ERROR');
@@ -239,6 +249,23 @@ export default function AttendancePage() {
           ).withFaceLandmarks().withFaceDescriptor();
 
           if (detection) {
+            // Draw facial landmarks in real-time
+            if (videoRef.current && canvasRef.current) {
+              const displaySize = {
+                width: videoRef.current.clientWidth,
+                height: videoRef.current.clientHeight
+              };
+              faceapi.matchDimensions(canvasRef.current, displaySize);
+              const resizedDetection = faceapi.resizeResults(detection, displaySize);
+              
+              // Clear previous drawings
+              const ctx = canvasRef.current.getContext('2d');
+              ctx?.clearRect(0, 0, displaySize.width, displaySize.height);
+              
+              // Draw landmarks
+              faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetection);
+            }
+
             const landmarks = detection.landmarks;
             const leftEye = landmarks.getLeftEye();
             const rightEye = landmarks.getRightEye();
@@ -279,6 +306,7 @@ export default function AttendancePage() {
               if (ratio < 0.6 || ratio > 1.6) {
                 hasTurnedHead = true;
                 clearInterval(scanInterval);
+                clearCanvas();
                 setCurrentEAR(null);
                 
                 setRegisterStep(4);
@@ -306,6 +334,8 @@ export default function AttendancePage() {
                 }
               }
             }
+          } else {
+            clearCanvas();
           }
         } catch (err) {
           console.error('Registration scan error:', err);
@@ -325,6 +355,7 @@ export default function AttendancePage() {
         attempts++;
         if (attempts > maxAttempts && !hasBlinked) {
           clearInterval(scanInterval);
+          clearCanvas();
           setLivenessStatus('failed');
           setLivenessMessage('Quá thời gian xác thực. Không phát hiện chớp mắt!');
           setScanResult('ERROR');
@@ -342,6 +373,21 @@ export default function AttendancePage() {
           ).withFaceLandmarks().withFaceDescriptor();
 
           if (detection) {
+            // Draw facial landmarks in real-time
+            if (videoRef.current && canvasRef.current) {
+              const displaySize = {
+                width: videoRef.current.clientWidth,
+                height: videoRef.current.clientHeight
+              };
+              faceapi.matchDimensions(canvasRef.current, displaySize);
+              const resizedDetection = faceapi.resizeResults(detection, displaySize);
+              
+              const ctx = canvasRef.current.getContext('2d');
+              ctx?.clearRect(0, 0, displaySize.width, displaySize.height);
+              
+              faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetection);
+            }
+
             const landmarks = detection.landmarks;
             const leftEye = landmarks.getLeftEye();
             const rightEye = landmarks.getRightEye();
@@ -357,6 +403,7 @@ export default function AttendancePage() {
               setLivenessMessage('Đã phát hiện chớp mắt! Đang lưu thông tin...');
               
               clearInterval(scanInterval);
+              clearCanvas();
               setCurrentEAR(null);
               playBeep(900, 0.15);
 
@@ -381,6 +428,8 @@ export default function AttendancePage() {
                 setIsScanning(false);
               }
             }
+          } else {
+            clearCanvas();
           }
         } catch (err) {
           console.error('Liveness scan error:', err);
@@ -559,6 +608,7 @@ export default function AttendancePage() {
                   </AnimatePresence>
 
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none z-10" />
 
                   {/* Spotlight Circle Mask and Apple progress ring for REGISTER mode */}
                   {mode === 'REGISTER' && isScanning && (
