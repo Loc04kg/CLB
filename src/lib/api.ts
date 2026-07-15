@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // IP LAN của máy chủ backend (đổi nếu IP thay đổi)
-const SERVER_IP = '192.168.1.39';
+const SERVER_IP = '192.168.1.66';
 const SERVER_PORT = 5000;
 
 // Phát hiện môi trường:
