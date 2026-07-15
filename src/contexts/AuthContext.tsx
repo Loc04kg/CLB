@@ -11,6 +11,7 @@ interface AuthContextType {
   signInWithEmail: (email: string, pass: string) => Promise<{ role: string }>;
   signUpWithEmail: (email: string, pass: string, name: string, studentId: string, role: UserRole) => Promise<{ role: string }>;
   logout: () => Promise<void>;
+  updateUser: (data: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -75,8 +76,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(null);
   };
 
+  const updateUser = (data: Partial<User>) => {
+    setUser((prev) => prev ? { ...prev, ...data } : null);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, role, loading, login, signInWithEmail, signUpWithEmail, logout }}>
+    <AuthContext.Provider value={{ user, role, loading, login, signInWithEmail, signUpWithEmail, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -14,7 +14,7 @@ import * as faceapi from '@vladmandic/face-api';
 type AttendanceMode = 'REGISTER' | 'CHECKIN' | 'GPS' | 'FINGERPRINT' | 'QR_CODE';
 
 export default function AttendancePage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [mode, setMode] = useState<AttendanceMode>('CHECKIN');
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<null | 'SUCCESS' | 'ERROR'>(null);
@@ -274,6 +274,17 @@ export default function AttendancePage() {
             if (currentStep === 1) {
               // Nhìn thẳng (Đã phát hiện khuôn mặt là OK)
               baselineEARRef.current = avgEAR; // Lưu giá trị co mắt mở tiêu chuẩn của riêng người dùng
+              
+              // CHÈN ẢNH CHỤP ĐẦU TIÊN VÀO AVATAR PROFILE CỦA USER
+              try {
+                const firstImage = captureFrame();
+                api.put(`/users/${user.id}`, { faceImage: firstImage }).then((res) => {
+                  updateUser({ faceImage: firstImage });
+                }).catch(err => console.error("Lỗi cập nhật ảnh đại diện ban đầu:", err));
+              } catch (e) {
+                console.error("Lỗi chụp ảnh đầu tiên:", e);
+              }
+
               playBeep(700, 0.1);
               currentStep = 2;
               setRegisterStep(2);
